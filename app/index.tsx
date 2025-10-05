@@ -7,7 +7,7 @@ export default function Index() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    // Esperar un poco para asegurar que el layout esté montado
+
     const timer = setTimeout(() => {
       setIsReady(true);
       router.replace('/login');

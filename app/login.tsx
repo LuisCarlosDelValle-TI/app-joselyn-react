@@ -15,10 +15,10 @@ export default function LoginScreen() {
             "Bienvenido",
             `Has iniciado sesión con éxito\n\nEmail: ${email}\nContraseña: ${password}`,
             [
-                { text: "Cancelar" },
-                { text: "OK", onPress: () => console.log("OK Presionado") }
+                {text: "Ok",
+                onPress: () => router.replace(`/(_tabs)/home`) }
             ]
-        )
+        );
 
     };
 
