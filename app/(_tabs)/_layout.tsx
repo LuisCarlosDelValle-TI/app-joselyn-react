@@ -1,10 +1,25 @@
-import { Stack } from 'expo-router';
+import { Tabs } from 'expo-router';
 
-export default function RootLayout() {
+export default function TabLayout() {
   return (
-    <Stack>
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="registro" options={{ headerShown: false }} />
-    </Stack>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#007AFF',
+      }}
+    >
+      <Tabs.Screen
+        name="home"
+        options={{
+          title: 'Inicio',
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Perfil',
+        }}
+      />
+    </Tabs>
   );
 }
