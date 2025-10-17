@@ -1,4 +1,4 @@
-import { View, Alert, Text, TextInput, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native';
+import { View, Alert, Image, Text, TextInput, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 
@@ -24,6 +24,8 @@ export default function LoginScreen() {
 
     return (
         <View style={styles.container}>
+            <Image source={require('../assets/LogoJoselyn.png')} style={{ width: 250, height: 200, alignSelf: 'center', marginBottom: 20 }} />
+
             <Text style={styles.title}>Iniciar Sesión</Text>
 
             <TextInput
