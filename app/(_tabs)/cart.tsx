@@ -1,67 +1,33 @@
-import { useState } from "react";
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from "react-native";
-import { Colors } from "../../constants/theme";
+import React, { useState } from 'react';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Colors } from '../../constants/theme';
+import { useCart } from '../../context/CartContext';
 
-interface Producto {
-    id: number;
-    nombre: string;
-    descripcion: string;
-    precio: number;
-    imagen: any;
-}
+const API_BASE_URL = 'htttp://192.168.1.52:3000';
+const STRIPE_TEST_TOKEN = 'tok_visa';
+const DUMMY_ORDER_ID = 1;
 
 export default function Carrito() {
     const colorScheme = useColorScheme();
     const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-    const [productos, setProductos] = useState<Producto[]>([
-        {
-            id: 1,
-            nombre: "Pixel 10 PRO XL",
-            descripcion: "Descripción detallada del primer producto",
-            precio: 30000.000,
-            imagen: require("../../assets/pixel10.jpg")
-        },
-        {
-            id: 2,
-            nombre: "Nest Hub 2da Gen",
-            descripcion: "Descripción detallada del segundo producto",
-            precio: 4900.50,
-            imagen: require("../../assets/nesthub.jpg")
-        },
-        {
-            id: 3,
-            nombre: "Google Buds",
-            descripcion: "Descripción detallada del tercer producto",
-            precio: 2000.99,
-            imagen: require("../../assets/audifonos.jpg")
-        }
-    ]);
-
+    const { items, remove, checkout } = useCart();
     const [modalVisible, setModalVisible] = useState(false);
-    const [productoSeleccionado, setProductoSeleccionado] = useState<Producto | null>(null);
+    const [productoSeleccionado, setProductoSeleccionado] = useState<any | null>(null);
+    const [loadingPayment, setLoadingPayment] = useState(false);
 
-    const eliminarProducto = (id: number) => {
+    const eliminarProducto = (id: number | string) => {
         Alert.alert(
-            "Eliminar producto",
-            "¿Estás seguro de que deseas eliminar este producto del carrito?",
+            'Eliminar producto',
+            '¿Estás seguro de que deseas eliminar este producto del carrito?',
             [
-                {
-                    text: "Cancelar",
-                    style: "cancel"
-                },
-                {
-                    text: "Eliminar",
-                    style: "destructive",
-                    onPress: () => {
-                        setProductos(productos.filter(producto => producto.id !== id));
-                    }
-                }
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Eliminar', style: 'destructive', onPress: () => remove(id) }
             ]
         );
     };
 
-    const mostrarDetalles = (producto: Producto) => {
+    const mostrarDetalles = (producto: any) => {
         setProductoSeleccionado(producto);
         setModalVisible(true);
     };
@@ -72,49 +38,82 @@ export default function Carrito() {
     };
 
     const calcularTotal = () => {
-        return productos.reduce((total, producto) => total + producto.precio, 0).toFixed(2);
+        return items.reduce((total, it) => total + (Number(it.price || 0) * it.quantity), 0).toFixed(2);
     };
+
+    const doCheckout = async () => {
+        if (items.length === 0) return;
+        setLoadingPayment(true);
+
+        const totalAmount = calcularTotal();
+
+        try {
+            const url = `${API_BASE_URL}/api/payments/process`;
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: DUMMY_ORDER_ID,
+                    token: STRIPE_TEST_TOKEN,
+                    currency: `usd`,
+                    totalAmount: totalAmount
+                }),
+            });
+
+            const result = await res.json();
+
+            if (res.ok && result.success) {
+                Alert.alert('Pago exitoso', 'Tu pago ha sido procesado correctamente.');
+                checkout();
+            } else {
+                Alert.alert('Error en el pago', result.message || 'Hubo un problema al procesar tu pago.');
+            }
+
+        } catch (err) {
+            console.error('Error de red/servidor:', err);
+            Alert.alert('Error de conexión', 'No se pudo conectar al servidor de pagos. Por favor, intenta nuevamente más tarde.');
+        } finally {
+            setLoadingPayment(false);
+        }
+    };  
+      
 
     return (
         <>
             <ScrollView style={{ backgroundColor: colors.background }}>
                 <View style={styles.ViewTop}>
                     <Text style={{ color: colors.text, fontSize: 52 }}>Carrito de compras</Text>
-                    {productos.length > 0 && (
+                    {items.length > 0 && (
                         <Text style={{ color: colors.text, fontSize: 18, marginTop: 10}}>
                             Total: ${calcularTotal()}
                         </Text>
                     )}
                 </View>
 
-                {productos.length === 0 ? (
+                {items.length === 0 ? (
                     <View style={styles.emptyCart}>
                         <Text style={{ color: colors.text, fontSize: 18, textAlign: 'center'}}>
                             Tu carrito está vacío
                         </Text>
                     </View>
                 ) : (
-                    productos.map((producto) => (
-                        <View key={producto.id} style={[styles.viewCard, { backgroundColor: colors.background}]}>
+                    items.map((producto) => (
+                        <View key={String(producto.productId)} style={[styles.viewCard, { backgroundColor: colors.background }]}> 
                             <View style={styles.imageContainer}>
-                                <Image source={producto.imagen} style={styles.productImage}/>
+                                {producto.image ? <Image source={{ uri: producto.image }} style={styles.productImage}/> : null}
                             </View>
                             <View style={styles.productDetails}>
                                 <Text style={[styles.productName, { color: colors.text }]}>
-                                    {producto.nombre}
+                                    {producto.name || `Producto ${producto.productId}`}
                                 </Text>
-                                <Text style={[styles.productDescription, { color: colors.text}]}>
-                                    {producto.descripcion}
-                                </Text>
-                                <Text style={[styles.productPrice, { color: colors.text}]}>
-                                    ${producto.precio.toFixed(2)}
-                                </Text>
+                                <Text style={[styles.productPrice, { color: colors.text }]}>${(Number(producto.price) || 0).toFixed(2)}</Text>
 
                                 <View style={styles.buttonContainer}>
                                     <Pressable
                                         style={({pressed}) => [
                                             styles.buttonDelete,
-                                            { backgroundColor: pressed ? "#4aa4f3ff" : "#36b5f4ff"}
+                                            { backgroundColor: pressed ? '#4aa4f3ff' : '#36b5f4ff' }
                                         ]}
                                         onPress={() => mostrarDetalles(producto)}
                                     >
@@ -124,9 +123,9 @@ export default function Carrito() {
                                     <Pressable
                                         style={({pressed}) => [
                                             styles.buttonDelete,
-                                            { backgroundColor: pressed ? "#d32f2f" : "#f44336"}
+                                            { backgroundColor: pressed ? '#d32f2f' : '#f44336' }
                                         ]}
-                                        onPress={() => eliminarProducto(producto.id)}
+                                        onPress={() => eliminarProducto(producto.productId)}
                                     >
                                         <Text style={styles.deleteIcon}>🗑</Text>
                                         <Text style={styles.buttonText}>Eliminar</Text>
@@ -136,6 +135,15 @@ export default function Carrito() {
                         </View>
                     ))
                 )}
+
+                {items.length > 0 && (
+                    <View style={{ padding: 20 }}>
+                        <Pressable onPress={doCheckout} style={[styles.modalButton, { backgroundColor: '#28a745' }]}> 
+                            <Text style={styles.modalButtonText}>Pagar ahora</Text>
+                        </Pressable>
+                    </View>
+                )}
+
             </ScrollView>
 
             <Modal
@@ -145,73 +153,28 @@ export default function Carrito() {
                 onRequestClose={cerrarModal}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+                    <View style={[styles.modalContent, { backgroundColor: colors.background }]}> 
                         {productoSeleccionado && (
                             <>
                                 <View style={styles.modalHeader}>
-                                    <Text style={[styles.modalTitle, { color: colors.text }]}>
-                                        Detalles del Producto
-                                    </Text>
-                                    <Pressable
-                                        style={styles.closeButton}
-                                        onPress={cerrarModal}
-                                    >
-                                        <Text style={styles.closeButtonText}>✕</Text>
-                                    </Pressable>
+                                    <Text style={[styles.modalTitle, { color: colors.text }]}>Detalle del producto</Text>
+                                    <Pressable style={styles.closeButton} onPress={cerrarModal}><Text style={styles.closeButtonText}>✕</Text></Pressable>
                                 </View>
-
                                 <ScrollView style={styles.modalBody}>
-                                    <View style={styles.modalImageContainer}>
-                                        <Image
-                                            source={productoSeleccionado.imagen}
-                                            style={styles.modalImage}
-                                        />
-                                    </View>
-
-                                    <Text style={[styles.modalProductName, { color: colors.text }]}>
-                                        {productoSeleccionado.nombre}
-                                    </Text>
-
-                                    <Text style={[styles.modalProductDescription, { color: colors.text }]}>
-                                        {productoSeleccionado.descripcion}
-                                    </Text>
-
-                                    <Text style={[styles.modalProductPrice, { color: colors.text }]}>
-                                        Precio: ${productoSeleccionado.precio.toFixed(2)}
-                                    </Text>
-
-                                    <View style={styles.additionalInfo}>
-                                        <Text style={[styles.infoTitle, { color: colors.text }]}>
-                                            Información adicional:
-                                        </Text>
-                                        <Text style={[styles.infoText, { color: colors.text }]}>
-                                            • Disponible en stock
-                                        </Text>
-                                        <Text style={[styles.infoText, { color: colors.text }]}>
-                                            • Envío gratuito
-                                        </Text>
-                                        <Text style={[styles.infoText, { color: colors.text }]}>
-                                            • Garantía de 30 días
-                                        </Text>
-                                    </View>
+                                    {productoSeleccionado.image ? (
+                                        <View style={styles.modalImageContainer}><Image source={{ uri: productoSeleccionado.image }} style={styles.modalImage} /></View>
+                                    ) : null}
+                                    <Text style={[styles.modalProductName, { color: colors.text }]}>{productoSeleccionado.name}</Text>
+                                    <Text style={[styles.modalProductPrice, { color: colors.text }]}>Precio: ${(Number(productoSeleccionado.price) || 0).toFixed(2)}</Text>
                                 </ScrollView>
-
-                                <View style={styles.modalFooter}>
-                                    <Pressable
-                                        style={[styles.modalButton, styles.closeModalButton]}
-                                        onPress={cerrarModal}
-                                    >
-                                        <Text style={styles.modalButtonText}>Cerrar</Text>
-                                    </Pressable>
-                                </View>
+                                <View style={styles.modalFooter}><Pressable style={[styles.modalButton, styles.closeModalButton]} onPress={cerrarModal}><Text style={styles.modalButtonText}>Cerrar</Text></Pressable></View>
                             </>
                         )}
                     </View>
                 </View>
             </Modal>
         </>
-
-    )
+    );
 }
 
 const styles = StyleSheet.create({
