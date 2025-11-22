@@ -44,7 +44,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const checkout = async () => {
     try {
       const body = { items: items.map(i => ({ productId: Number(i.productId), quantity: i.quantity })) };
-      const base = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:3001';
+      const base = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.52:3000';
       // Note: On Android emulator use 10.0.2.2, on real device use server IP or tunnel
       const res = await fetch(`${base}/checkout`, {
         method: 'POST',

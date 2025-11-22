@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View, ActivityIndicator } from 'react-native';
 import { Colors } from '../../constants/theme';
 import { useCart } from '../../context/CartContext';
 
-const API_BASE_URL = 'htttp://192.168.1.52:3000';
+const API_BASE_URL = 'http://192.168.1.52:3000';
 const STRIPE_TEST_TOKEN = 'tok_visa';
-const DUMMY_ORDER_ID = 1;
+const DUMMY_ORDER_ID = 1; // Usado para prueba de pago, no debe ser fijo en producción
+const CUSTOMER_ID = 'user_test_mobile'; // Usado para crear la orden
 
 export default function Carrito() {
     const colorScheme = useColorScheme();
     const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-    const { items, remove, checkout } = useCart();
+    const { items, remove, checkout, add, clear } = useCart();
     const [modalVisible, setModalVisible] = useState(false);
     const [productoSeleccionado, setProductoSeleccionado] = useState<any | null>(null);
     const [loadingPayment, setLoadingPayment] = useState(false);
@@ -27,6 +28,18 @@ export default function Carrito() {
         );
     };
 
+    // FUNCIÓN PARA INCREMENTAR LA CANTIDAD
+    const handleIncrement = (product) => {
+        add({
+            productId: product.productId,
+            name: product.name,
+            image: product.image,
+            price: product.price,
+            quantity: 1, // 'add' añade una unidad más
+        });
+    };
+
+
     const mostrarDetalles = (producto: any) => {
         setProductoSeleccionado(producto);
         setModalVisible(true);
@@ -41,43 +54,73 @@ export default function Carrito() {
         return items.reduce((total, it) => total + (Number(it.price || 0) * it.quantity), 0).toFixed(2);
     };
 
+    // FLUJO DE PAGO (ASEGURA LIMPIEZA)
     const doCheckout = async () => {
         if (items.length === 0) return;
         setLoadingPayment(true);
 
-        const totalAmount = calcularTotal();
+        const orderItems = items.map(item => ({
+            product_id: Number(item.productId),
+            quantity: item.quantity,
+            unit_price: Number(item.price)
+        }));
+
+        let orderId = null;
 
         try {
-            const url = `${API_BASE_URL}/api/payments/process`;
+            // 1. CREAR LA ORDEN EN LA API
+            const createOrderUrl = `${API_BASE_URL}/api/orders`;
 
-            const res = await fetch(url, {
+            const orderRes = await fetch(createOrderUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    orderId: DUMMY_ORDER_ID,
-                    token: STRIPE_TEST_TOKEN,
-                    currency: `usd`,
-                    totalAmount: totalAmount
+                    customer_id: CUSTOMER_ID,
+                    items: orderItems,
+                    payment_status: 'pending',
+                    order_status: 'new'
                 }),
             });
 
-            const result = await res.json();
-
-            if (res.ok && result.success) {
-                Alert.alert('Pago exitoso', 'Tu pago ha sido procesado correctamente.');
-                checkout();
-            } else {
-                Alert.alert('Error en el pago', result.message || 'Hubo un problema al procesar tu pago.');
+            if (!orderRes.ok) {
+                const errBody = await orderRes.json().catch(() => ({}));
+                throw new Error(`Fallo al crear la orden: ${orderRes.status} - ${errBody.error || 'Respuesta no JSON'}`);
             }
 
-        } catch (err) {
-            console.error('Error de red/servidor:', err);
-            Alert.alert('Error de conexión', 'No se pudo conectar al servidor de pagos. Por favor, intenta nuevamente más tarde.');
+            const orderData = await orderRes.json();
+            orderId = orderData.id;
+
+            // 2. PROCESAR EL PAGO USANDO STRIPE (tok_visa)
+            const paymentUrl = `${API_BASE_URL}/api/payment/process`;
+
+            const paymentRes = await fetch(paymentUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: orderId,
+                    token: STRIPE_TEST_TOKEN,
+                    currency: 'usd',
+                    totalAmount: orderData.total
+                }),
+            });
+
+            const paymentResult = await paymentRes.json();
+
+            if (paymentRes.ok && paymentResult.success) {
+                Alert.alert('¡Pago Exitoso!', `Folio: ${paymentResult.folio}`);
+                clear(); // <-- VACÍA EL CARRITO AL ÉXITO
+            } else {
+                throw new Error(paymentResult.error || 'Pago rechazado por el proveedor.');
+            }
+
+        } catch (err: any) {
+            console.error('Error en el flujo de checkout:', err);
+            Alert.alert('Error en el pago', err.message || 'Error desconocido.');
         } finally {
             setLoadingPayment(false);
         }
-    };  
-      
+    };
+
 
     return (
         <>
@@ -85,7 +128,7 @@ export default function Carrito() {
                 <View style={styles.ViewTop}>
                     <Text style={{ color: colors.text, fontSize: 52 }}>Carrito de compras</Text>
                     {items.length > 0 && (
-                        <Text style={{ color: colors.text, fontSize: 18, marginTop: 10}}>
+                        <Text style={{ color: colors.text, fontSize: 18, marginTop: 10 }}>
                             Total: ${calcularTotal()}
                         </Text>
                     )}
@@ -93,15 +136,19 @@ export default function Carrito() {
 
                 {items.length === 0 ? (
                     <View style={styles.emptyCart}>
-                        <Text style={{ color: colors.text, fontSize: 18, textAlign: 'center'}}>
+                        <Text style={{ color: colors.text, fontSize: 18, textAlign: 'center' }}>
                             Tu carrito está vacío
                         </Text>
                     </View>
                 ) : (
                     items.map((producto) => (
-                        <View key={String(producto.productId)} style={[styles.viewCard, { backgroundColor: colors.background }]}> 
+                        <View key={String(producto.productId)} style={[styles.viewCard, { backgroundColor: colors.background }]}>
                             <View style={styles.imageContainer}>
-                                {producto.image ? <Image source={{ uri: producto.image }} style={styles.productImage}/> : null}
+                                {producto.image ? <Image source={{ uri: producto.image }} style={styles.productImage} /> : null}
+                                {/* CONTADOR DE CANTIDAD */}
+                                <View style={styles.quantityBadge}>
+                                    <Text style={styles.quantityText}>{producto.quantity}</Text>
+                                </View>
                             </View>
                             <View style={styles.productDetails}>
                                 <Text style={[styles.productName, { color: colors.text }]}>
@@ -109,21 +156,33 @@ export default function Carrito() {
                                 </Text>
                                 <Text style={[styles.productPrice, { color: colors.text }]}>${(Number(producto.price) || 0).toFixed(2)}</Text>
 
-                                <View style={styles.buttonContainer}>
+                                <View style={styles.actionsGroup}>
+                                    {/* BOTÓN + PARA INCREMENTAR */}
                                     <Pressable
-                                        style={({pressed}) => [
+                                        onPress={() => handleIncrement(producto)}
+                                        style={({ pressed }) => [
+                                            styles.buttonAdd,
+                                            { backgroundColor: pressed ? '#4aa4f3ff' : '#36b5f4ff', flex: 0.5 }
+                                        ]}
+                                    >
+                                        <Text style={styles.buttonText}>+</Text>
+                                    </Pressable>
+                                    {/* Botón Ver Detalles */}
+                                    <Pressable
+                                        style={({ pressed }) => [
                                             styles.buttonDelete,
-                                            { backgroundColor: pressed ? '#4aa4f3ff' : '#36b5f4ff' }
+                                            { backgroundColor: pressed ? '#4aa4f3ff' : '#36b5f4ff', flex: 1 }
                                         ]}
                                         onPress={() => mostrarDetalles(producto)}
                                     >
                                         <Text style={styles.deleteIcon}>👁️</Text>
                                         <Text style={styles.buttonText}>Ver Detalles</Text>
                                     </Pressable>
+                                    {/* Botón Eliminar */}
                                     <Pressable
-                                        style={({pressed}) => [
+                                        style={({ pressed }) => [
                                             styles.buttonDelete,
-                                            { backgroundColor: pressed ? '#d32f2f' : '#f44336' }
+                                            { backgroundColor: pressed ? '#d32f2f' : '#f44336', flex: 1.5 }
                                         ]}
                                         onPress={() => eliminarProducto(producto.productId)}
                                     >
@@ -138,8 +197,16 @@ export default function Carrito() {
 
                 {items.length > 0 && (
                     <View style={{ padding: 20 }}>
-                        <Pressable onPress={doCheckout} style={[styles.modalButton, { backgroundColor: '#28a745' }]}> 
-                            <Text style={styles.modalButtonText}>Pagar ahora</Text>
+                        <Pressable
+                            onPress={doCheckout}
+                            style={[styles.modalButton, { backgroundColor: '#28a745' }]}
+                            disabled={loadingPayment}
+                        >
+                            {loadingPayment ? (
+                                <ActivityIndicator color="#fff" />
+                            ) : (
+                                <Text style={styles.modalButtonText}>Pagar ahora</Text>
+                            )}
                         </Pressable>
                     </View>
                 )}
@@ -153,7 +220,7 @@ export default function Carrito() {
                 onRequestClose={cerrarModal}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.background }]}> 
+                    <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
                         {productoSeleccionado && (
                             <>
                                 <View style={styles.modalHeader}>
@@ -243,19 +310,22 @@ const styles = StyleSheet.create({
     buttonContainer: {
         flexDirection: 'row',
         width: '100%',
-        justifyContent: 'center',
+        justifyContent: 'space-between', 
         alignItems: 'center',
         marginTop: 20,
-        gap: 8,
+        paddingHorizontal: 0,
+        paddingRight: 6,
+        gap: 5
     },
     buttonDelete: {
-        flex: 1,
+        minWidth: 85,
+        height: 40,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        marginHorizontal: 3,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        height: 40,
-        paddingHorizontal: 15,
-        borderRadius: 8,
         shadowColor: '#000',
         shadowOffset: {
             width: 0,
@@ -267,22 +337,46 @@ const styles = StyleSheet.create({
     },
     deleteIcon: {
         fontSize: 16,
-        marginRight: 5
+        marginRight: 8
     },
     buttonText: {
         color: 'white',
         fontSize: 14,
-        fontWeight: '600'
+        fontWeight: '700'
     },
     buttonAdd: {
+        width: 40,
         height: 40,
-        padding: 15,
-        borderRadius: 5,
-        marginTop: 10,
-        marginRight: 10,
-        marginLeft: 10,
+        padding: 0,
+        borderRadius: 8,
+        marginRight: 6,
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2
+        },
+        shadowOpacity: 0.18,
+        shadowRadius: 2,
+        elevation: 3
+    },
+    quantityBadge: {
+        position: 'absolute',
+        top: -5,
+        right: 10,
+        backgroundColor: '#007bff', // Azul para que destaque
+        borderRadius: 12,
+        width: 24,
+        height: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    quantityText: {
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 'bold',
     },
     modalOverlay: {
         flex: 1,
